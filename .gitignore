@@ -1,0 +1,8 @@
+node_modules
+.next
+dist
+.env
+storage
+*.log
+playwright-report
+test-results
