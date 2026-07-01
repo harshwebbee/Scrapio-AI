@@ -7,5 +7,6 @@ dotenv.config();
 export const env = {
   port: Number(process.env.API_PORT ?? 4000),
   redisUrl: process.env.REDIS_URL ?? "redis://127.0.0.1:6379",
+  databaseUrl: process.env.DATABASE_URL ?? "",
   storageDir: path.resolve(process.cwd(), process.env.STORAGE_DIR ?? "../../storage")
 };

@@ -28,6 +28,24 @@ type CrawlEvent = {
   failedReason: string | null;
 };
 
+type ServiceHealth = {
+  name: string;
+  ok: boolean;
+  message: string;
+  action?: string;
+};
+
+type SystemHealth = {
+  ok: boolean;
+  checks: ServiceHealth[];
+};
+
+type AppError = {
+  code: string;
+  message: string;
+  action?: string;
+};
+
 const apiUrl = process.env.NEXT_PUBLIC_API_URL ?? "http://localhost:4000";
 
 export default function Home() {
@@ -40,14 +58,55 @@ export default function Home() {
   const [exportType, setExportType] = useState<"markdown" | "json" | "both">("both");
   const [domainMode, setDomainMode] = useState<"internal" | "internal_external">("internal");
   const [crawl, setCrawl] = useState<CrawlEvent | null>(null);
+  const [health, setHealth] = useState<SystemHealth | null>(null);
+  const [healthError, setHealthError] = useState<AppError | null>(null);
   const [isSubmitting, setIsSubmitting] = useState(false);
-  const [error, setError] = useState("");
+  const [error, setError] = useState<AppError | null>(null);
+
+  useEffect(() => {
+    let cancelled = false;
+
+    async function loadHealth() {
+      try {
+        const response = await fetch(`${apiUrl}/api/system/health`);
+        const body = await response.json();
+        if (!cancelled) {
+          setHealth(body);
+          setHealthError(null);
+        }
+      } catch {
+        if (!cancelled) {
+          setHealth(null);
+          setHealthError({
+            code: "API_UNAVAILABLE",
+            message: "The API is not reachable.",
+            action: `Start the API server and confirm NEXT_PUBLIC_API_URL points to ${apiUrl}.`
+          });
+        }
+      }
+    }
+
+    loadHealth();
+    const timer = window.setInterval(loadHealth, 5000);
+    return () => {
+      cancelled = true;
+      window.clearInterval(timer);
+    };
+  }, []);
 
   useEffect(() => {
     if (!crawl?.id) return;
     const socket: Socket = io(apiUrl, { transports: ["websocket", "polling"] });
     socket.emit("watch:crawl", crawl.id);
     socket.on("crawl:progress", (event: CrawlEvent) => setCrawl(event));
+    socket.on("crawl:error", (event: AppError) => setError(event));
+    socket.on("connect_error", () =>
+      setError({
+        code: "LIVE_PROGRESS_UNAVAILABLE",
+        message: "Live progress is not connected.",
+        action: "Confirm the API server is running, then refresh the page."
+      })
+    );
     return () => {
       socket.disconnect();
     };
@@ -62,7 +121,7 @@ export default function Home() {
 
   async function submit(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
-    setError("");
+    setError(null);
     setIsSubmitting(true);
 
     try {
@@ -82,20 +141,22 @@ export default function Home() {
       });
 
       if (!response.ok) {
-        const body = await response.json();
-        throw new Error(body.error ?? "Unable to start crawl");
+        throw await readApiError(response);
       }
 
       const body = await response.json();
       setCrawl({ id: body.id, status: body.status, progress: {}, result: null, failedReason: null });
     } catch (err) {
-      setError(err instanceof Error ? err.message : "Unable to start crawl");
+      setError(normalizeClientError(err));
     } finally {
       setIsSubmitting(false);
     }
   }
 
   const ready = crawl?.status === "completed";
+  const redisReady = health?.checks.find((check) => check.name === "redis")?.ok ?? false;
+  const apiReady = !healthError;
+  const canSubmit = apiReady && redisReady && !isSubmitting;
 
   return (
     <main className="shell">
@@ -109,6 +170,30 @@ export default function Home() {
 
       <form className="crawler-grid" onSubmit={submit}>
         <section className="panel form-panel">
+          <div className="health-strip">
+            <div>
+              <p className="eyebrow">System health</p>
+              <strong>{health?.ok ? "All services ready" : "Action needed"}</strong>
+            </div>
+            <button className="text-button" type="button" onClick={() => window.location.reload()}>
+              Refresh
+            </button>
+          </div>
+
+          {healthError ? <ErrorNotice error={healthError} /> : null}
+          {health ? (
+            <div className="service-grid">
+              {health.checks.map((check) => (
+                <div className={`service ${check.ok ? "ok" : "bad"}`} key={check.name}>
+                  <span>{check.name}</span>
+                  <strong>{check.ok ? "Ready" : "Missing"}</strong>
+                  <small>{check.message}</small>
+                  {check.action ? <small>{check.action}</small> : null}
+                </div>
+              ))}
+            </div>
+          ) : null}
+
           <label className="field wide">
             Website URL
             <input value={url} onChange={(event) => setUrl(event.target.value)} placeholder="https://example.com" required />
@@ -160,11 +245,11 @@ export default function Home() {
             />
           </fieldset>
 
-          <button className="primary-button" disabled={isSubmitting} type="submit">
-            {isSubmitting ? "Starting crawl" : "Start crawl"}
+          <button className="primary-button" disabled={!canSubmit} type="submit">
+            {isSubmitting ? "Starting crawl" : redisReady ? "Start crawl" : "Start Redis first"}
           </button>
 
-          {error ? <p className="error">{error}</p> : null}
+          {error ? <ErrorNotice error={error} /> : null}
         </section>
 
         <section className="panel progress-panel">
@@ -193,7 +278,7 @@ export default function Home() {
             <Stat label="AI chunks" value={crawl?.result?.chunks ?? 0} />
           </div>
 
-          {crawl?.failedReason ? <p className="error">{crawl.failedReason}</p> : null}
+          {crawl?.failedReason ? <ErrorNotice error={friendlyFailedReason(crawl.failedReason)} /> : null}
 
           <a className={`download ${ready ? "" : "disabled"}`} href={ready ? `${apiUrl}/api/crawls/${crawl.id}/download` : undefined}>
             Download ZIP
@@ -202,6 +287,69 @@ export default function Home() {
       </form>
     </main>
   );
+}
+
+async function readApiError(response: Response): Promise<AppError> {
+  const fallback: AppError = {
+    code: "REQUEST_FAILED",
+    message: "The request could not be completed.",
+    action: "Check the service status and try again."
+  };
+
+  const body = await response.json().catch(() => null);
+  if (body?.error && typeof body.error === "object") {
+    return {
+      code: String(body.error.code ?? fallback.code),
+      message: String(body.error.message ?? fallback.message),
+      action: body.error.action ? String(body.error.action) : fallback.action
+    };
+  }
+
+  if (typeof body?.error === "string") {
+    return {
+      ...fallback,
+      message: body.error
+    };
+  }
+
+  return fallback;
+}
+
+function normalizeClientError(error: unknown): AppError {
+  if (isAppError(error)) return error;
+  return {
+    code: "REQUEST_FAILED",
+    message: "Scrapio could not start the crawl.",
+    action: "Check that the API and Redis are running, then try again."
+  };
+}
+
+function friendlyFailedReason(reason: string): AppError {
+  if (/chromium|playwright|executable/i.test(reason)) {
+    return {
+      code: "PLAYWRIGHT_BROWSER_MISSING",
+      message: "The crawler browser is not installed.",
+      action: "Run `npx playwright install chromium`, then retry the crawl."
+    };
+  }
+
+  if (/ECONNREFUSED|Redis|6379/i.test(reason)) {
+    return {
+      code: "REDIS_UNAVAILABLE",
+      message: "The crawl worker lost its Redis connection.",
+      action: "Run `npm run infra:up`, restart the worker, then retry."
+    };
+  }
+
+  return {
+    code: "CRAWL_FAILED",
+    message: "The crawl failed before the export was created.",
+    action: "Review the worker logs, then retry with a smaller page limit."
+  };
+}
+
+function isAppError(error: unknown): error is AppError {
+  return Boolean(error && typeof error === "object" && "message" in error && "code" in error);
 }
 
 function Switch({ label, checked, onChange }: { label: string; checked: boolean; onChange: (value: boolean) => void }) {
@@ -227,6 +375,15 @@ function Stat({ label, value }: { label: string; value: string | number }) {
     <div className="stat">
       <span>{label}</span>
       <strong>{value}</strong>
+    </div>
+  );
+}
+
+function ErrorNotice({ error }: { error: AppError }) {
+  return (
+    <div className="notice" role="alert">
+      <strong>{error.message}</strong>
+      {error.action ? <span>{error.action}</span> : null}
     </div>
   );
 }

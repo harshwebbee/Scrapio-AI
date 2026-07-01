@@ -1,0 +1,26 @@
+services:
+  redis:
+    image: redis:7-alpine
+    container_name: scrapio-redis
+    ports:
+      - "6379:6379"
+    volumes:
+      - redis-data:/data
+    command: ["redis-server", "--appendonly", "yes"]
+
+  postgres:
+    image: postgres:16-alpine
+    container_name: scrapio-postgres
+    ports:
+      - "5432:5432"
+    environment:
+      POSTGRES_DB: scrapio
+      POSTGRES_USER: scrapio
+      POSTGRES_PASSWORD: scrapio
+    volumes:
+      - postgres-data:/var/lib/postgresql/data
+      - ./db/schema.sql:/docker-entrypoint-initdb.d/001-schema.sql:ro
+
+volumes:
+  redis-data:
+  postgres-data:

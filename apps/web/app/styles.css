@@ -118,6 +118,72 @@ h2 {
   font-weight: 800;
 }
 
+.health-strip {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  border-bottom: 1px solid var(--line);
+  padding-bottom: 14px;
+}
+
+.health-strip strong {
+  display: block;
+  font-size: 18px;
+}
+
+.text-button {
+  min-height: 34px;
+  border: 1px solid var(--line);
+  border-radius: 6px;
+  background: #fff;
+  color: var(--ink);
+  padding: 7px 10px;
+  font-weight: 800;
+}
+
+.service-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 8px;
+}
+
+.service {
+  min-height: 82px;
+  border: 1px solid var(--line);
+  border-left-width: 4px;
+  border-radius: 8px;
+  padding: 10px;
+}
+
+.service.ok {
+  border-left-color: var(--green);
+}
+
+.service.bad {
+  border-left-color: var(--red);
+}
+
+.service span {
+  display: block;
+  color: var(--muted);
+  font-size: 12px;
+  font-weight: 900;
+  text-transform: uppercase;
+}
+
+.service strong {
+  display: block;
+  margin-top: 5px;
+}
+
+.service small {
+  display: block;
+  margin-top: 5px;
+  color: var(--muted);
+  overflow-wrap: anywhere;
+}
+
 .field input,
 .field select {
   width: 100%;
@@ -318,6 +384,27 @@ h2 {
   font-weight: 800;
 }
 
+.notice {
+  display: grid;
+  gap: 6px;
+  border: 1px solid rgba(180, 35, 24, 0.24);
+  border-left: 4px solid var(--red);
+  border-radius: 8px;
+  background: #fff7f5;
+  color: var(--ink);
+  padding: 12px;
+}
+
+.notice strong {
+  color: var(--red);
+}
+
+.notice span {
+  color: var(--muted);
+  font-size: 13px;
+  font-weight: 700;
+}
+
 @media (max-width: 860px) {
   .crawler-grid {
     grid-template-columns: 1fr;
@@ -325,6 +412,10 @@ h2 {
 
   .stats {
     grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+
+  .service-grid {
+    grid-template-columns: 1fr;
   }
 
   h1 {

@@ -12,6 +12,8 @@
     "dev:api": "npm run dev -w apps/api",
     "dev:web": "npm run dev -w apps/web",
     "worker": "npm run worker -w apps/api",
+    "infra:up": "docker compose up -d redis postgres",
+    "infra:down": "docker compose down",
     "build": "npm run build -w packages/scraper && npm run build -w apps/api && npm run build -w apps/web",
     "typecheck": "tsc --noEmit",
     "lint": "eslint . --ext .ts,.tsx"
