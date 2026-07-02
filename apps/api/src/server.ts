@@ -12,9 +12,13 @@ import { ApiError, errorHandler, sendError } from "./errors.js";
 import { checkPostgres, checkRedis, getSystemHealth } from "./health.js";
 import {
   createCrawlRecord,
+  getCrawlAnalytics,
+  getCrawlDetail,
   getPersistedCrawlEvent,
   isPersistedCrawlCompleted,
+  listCrawlPages,
   markCrawlFailed,
+  searchCrawl,
   type PersistedCrawlEvent
 } from "./persistence.js";
 import { crawlQueue } from "./queue.js";
@@ -94,6 +98,50 @@ app.get("/api/crawls/:id", async (req, res, next) => {
     const event = await getCrawlEvent(req.params.id);
     if (!event) throw new ApiError(404, "CRAWL_NOT_FOUND", "That crawl could not be found.", "Start a new crawl.");
     res.json(event);
+  } catch (error) {
+    next(error);
+  }
+});
+
+app.get("/api/crawls/:id/detail", async (req, res, next) => {
+  try {
+    const detail = await getCrawlDetail(req.params.id);
+    if (!detail) throw new ApiError(404, "CRAWL_NOT_FOUND", "That crawl could not be found.", "Start a new crawl.");
+    res.json(detail);
+  } catch (error) {
+    next(error);
+  }
+});
+
+app.get("/api/crawls/:id/pages", async (req, res, next) => {
+  try {
+    const detail = await getCrawlDetail(req.params.id);
+    if (!detail) throw new ApiError(404, "CRAWL_NOT_FOUND", "That crawl could not be found.", "Start a new crawl.");
+    const pages = await listCrawlPages(req.params.id);
+    res.json({ crawlId: req.params.id, pages });
+  } catch (error) {
+    next(error);
+  }
+});
+
+app.get("/api/crawls/:id/analytics", async (req, res, next) => {
+  try {
+    const analytics = await getCrawlAnalytics(req.params.id);
+    if (!analytics) throw new ApiError(404, "CRAWL_NOT_FOUND", "That crawl could not be found.", "Start a new crawl.");
+    res.json(analytics);
+  } catch (error) {
+    next(error);
+  }
+});
+
+app.get("/api/crawls/:id/search", async (req, res, next) => {
+  try {
+    const detail = await getCrawlDetail(req.params.id);
+    if (!detail) throw new ApiError(404, "CRAWL_NOT_FOUND", "That crawl could not be found.", "Start a new crawl.");
+
+    const query = typeof req.query.q === "string" ? req.query.q : "";
+    const results = await searchCrawl(req.params.id, query);
+    res.json({ crawlId: req.params.id, query, results });
   } catch (error) {
     next(error);
   }

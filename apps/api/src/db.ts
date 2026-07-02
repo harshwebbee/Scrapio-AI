@@ -48,6 +48,7 @@ export async function ensureDatabaseSchema(): Promise<void> {
   const schemaPath = await findSchemaPath();
   const schema = await fs.readFile(schemaPath, "utf8");
   await pool.query(schema);
+  await ensureSchemaMigrations();
 }
 
 export async function checkDatabaseConnection(): Promise<void> {
@@ -71,4 +72,24 @@ async function findSchemaPath(): Promise<string> {
   }
 
   throw new Error("Could not find db/schema.sql.");
+}
+
+async function ensureSchemaMigrations(): Promise<void> {
+  await getPool().query("ALTER TABLE crawls ADD COLUMN IF NOT EXISTS chunk_size INTEGER NOT NULL DEFAULT 800");
+  await getPool().query("ALTER TABLE crawls ADD COLUMN IF NOT EXISTS chunk_overlap INTEGER NOT NULL DEFAULT 100");
+  await getPool().query(`
+    CREATE TABLE IF NOT EXISTS crawl_diffs (
+      id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+      crawl_id UUID NOT NULL REFERENCES crawls(id) ON DELETE CASCADE,
+      baseline_crawl_id UUID REFERENCES crawls(id) ON DELETE SET NULL,
+      summary JSONB NOT NULL DEFAULT '{}'::jsonb,
+      new_pages JSONB NOT NULL DEFAULT '[]'::jsonb,
+      updated_pages JSONB NOT NULL DEFAULT '[]'::jsonb,
+      removed_pages JSONB NOT NULL DEFAULT '[]'::jsonb,
+      unchanged_pages JSONB NOT NULL DEFAULT '[]'::jsonb,
+      created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+      UNIQUE (crawl_id)
+    )
+  `);
+  await getPool().query("CREATE INDEX IF NOT EXISTS crawl_diffs_crawl_id_idx ON crawl_diffs(crawl_id)");
 }

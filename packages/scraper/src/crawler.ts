@@ -67,7 +67,7 @@ export async function runCrawl(config: CrawlConfig, onProgress?: ProgressCallbac
     await browser.close();
   }
 
-  const chunks = buildChunks(pages);
+  const chunks = buildChunks(pages, config.chunkSize, config.chunkOverlap);
   await writeExports(rootUrl, pages, chunks, config);
 
   const result: CrawlResult = {
@@ -135,7 +135,7 @@ async function writeExports(rootUrl: string, pages: ExtractedPage[], chunks: AiC
     );
   }
 
-  if (config.exportType === "json" || config.exportType === "both") {
+  if (config.exportType === "json" || config.exportType === "jsonl" || config.exportType === "both") {
     await Promise.all(
       pages.map((page) => {
         page.jsonPath = path.join("json", "pages", `${slugForPage(page.url)}.json`);
@@ -149,18 +149,32 @@ async function writeExports(rootUrl: string, pages: ExtractedPage[], chunks: AiC
       pages,
       chunks
     };
-    await fs.writeFile(path.join(config.outputDir, "json", "knowledge-base.json"), JSON.stringify(knowledgeBase, null, 2));
+    if (config.exportType === "json" || config.exportType === "both") {
+      await fs.writeFile(path.join(config.outputDir, "json", "knowledge-base.json"), JSON.stringify(knowledgeBase, null, 2));
+    }
+    if (config.exportType === "jsonl" || config.exportType === "both") {
+      const lines = chunks
+        .map((chunk) =>
+          JSON.stringify({
+            ...chunk,
+            website: rootUrl,
+            crawl_date: crawlDate
+          })
+        )
+        .join("\n");
+      await fs.writeFile(path.join(config.outputDir, "json", "chunks.jsonl"), lines ? `${lines}\n` : "");
+    }
   }
 
   await fs.writeFile(path.join(config.outputDir, "metadata", "pages.json"), JSON.stringify(pages.map((page) => page.metadata), null, 2));
 }
 
-function buildChunks(pages: ExtractedPage[]): AiChunk[] {
+function buildChunks(pages: ExtractedPage[], chunkSize: number, chunkOverlap: number): AiChunk[] {
   const chunks: AiChunk[] = [];
   let nextIndex = 1;
 
   for (const page of pages) {
-    const result = chunkContent(page.path, page.content, nextIndex);
+    const result = chunkContent(page.path, page.content, nextIndex, chunkSize, chunkOverlap);
     result.chunks.forEach((content, offset) => {
       chunks.push({
         chunk_id: String(nextIndex + offset).padStart(3, "0"),

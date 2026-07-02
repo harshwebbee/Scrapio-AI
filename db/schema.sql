@@ -16,6 +16,8 @@ CREATE TABLE IF NOT EXISTS crawls (
   max_pages TEXT NOT NULL DEFAULT '50',
   export_type TEXT NOT NULL DEFAULT 'both',
   domain_mode TEXT NOT NULL DEFAULT 'internal',
+  chunk_size INTEGER NOT NULL DEFAULT 800,
+  chunk_overlap INTEGER NOT NULL DEFAULT 100,
   created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
   started_at TIMESTAMPTZ,
   completed_at TIMESTAMPTZ,
@@ -107,7 +109,21 @@ CREATE TABLE IF NOT EXISTS exports (
   created_at TIMESTAMPTZ NOT NULL DEFAULT now()
 );
 
+CREATE TABLE IF NOT EXISTS crawl_diffs (
+  id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+  crawl_id UUID NOT NULL REFERENCES crawls(id) ON DELETE CASCADE,
+  baseline_crawl_id UUID REFERENCES crawls(id) ON DELETE SET NULL,
+  summary JSONB NOT NULL DEFAULT '{}'::jsonb,
+  new_pages JSONB NOT NULL DEFAULT '[]'::jsonb,
+  updated_pages JSONB NOT NULL DEFAULT '[]'::jsonb,
+  removed_pages JSONB NOT NULL DEFAULT '[]'::jsonb,
+  unchanged_pages JSONB NOT NULL DEFAULT '[]'::jsonb,
+  created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+  UNIQUE (crawl_id)
+);
+
 CREATE INDEX IF NOT EXISTS pages_crawl_id_idx ON pages(crawl_id);
 CREATE INDEX IF NOT EXISTS assets_crawl_id_idx ON assets(crawl_id);
 CREATE INDEX IF NOT EXISTS links_crawl_id_idx ON links(crawl_id);
 CREATE INDEX IF NOT EXISTS chunks_page_id_idx ON chunks(page_id);
+CREATE INDEX IF NOT EXISTS crawl_diffs_crawl_id_idx ON crawl_diffs(crawl_id);

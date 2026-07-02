@@ -1,4 +1,4 @@
-export type ExportType = "markdown" | "json" | "both";
+export type ExportType = "markdown" | "json" | "jsonl" | "both";
 export type DomainMode = "internal" | "internal_external";
 
 export type CrawlConfig = {
@@ -10,6 +10,8 @@ export type CrawlConfig = {
   downloadDocuments: boolean;
   exportType: ExportType;
   domainMode: DomainMode;
+  chunkSize: number;
+  chunkOverlap: number;
   outputDir: string;
 };
 

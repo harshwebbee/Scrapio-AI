@@ -18,7 +18,7 @@
     "stack:down": "docker compose down",
     "build": "npm run build -w packages/scraper && npm run build -w apps/api && npm run build -w apps/web",
     "typecheck": "npm run build -w packages/scraper && tsc --noEmit",
-    "test": "npm run build -w packages/scraper && node --test packages/scraper/dist/utils.test.js",
+    "test": "npm run build -w packages/scraper && npm run build -w apps/api && node --test packages/scraper/dist/utils.test.js apps/api/dist/persistence.test.js",
     "lint": "eslint . --ext .ts,.tsx"
   },
   "dependencies": {

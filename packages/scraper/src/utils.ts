@@ -70,17 +70,22 @@ export function htmlToPlainText(html: string): string {
     .trim();
 }
 
-export function chunkContent(pagePath: string, content: string, startIndex: number): { chunks: string[]; nextIndex: number } {
+export function chunkContent(
+  pagePath: string,
+  content: string,
+  startIndex: number,
+  chunkSize = 800,
+  overlap = 100
+): { chunks: string[]; nextIndex: number } {
   const words = content.split(/\s+/).filter(Boolean);
   const chunks: string[] = [];
-  const chunkSize = 800;
-  const overlap = 100;
+  const step = Math.max(1, chunkSize - overlap);
   let cursor = 0;
 
   while (cursor < words.length) {
     chunks.push(words.slice(cursor, cursor + chunkSize).join(" "));
     if (cursor + chunkSize >= words.length) break;
-    cursor += chunkSize - overlap;
+    cursor += step;
   }
 
   return {

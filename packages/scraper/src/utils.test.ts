@@ -28,3 +28,15 @@ test("chunkContent creates overlapping chunks for long pages", () => {
   assert.match(result.chunks[0], /^word0 /);
   assert.match(result.chunks[1], /^word700 /);
 });
+
+test("chunkContent accepts custom chunk size and overlap", () => {
+  const content = Array.from({ length: 12 }, (_, index) => `word${index}`).join(" ");
+  const result = chunkContent("/docs", content, 1, 5, 2);
+
+  assert.deepEqual(result.chunks, [
+    "word0 word1 word2 word3 word4",
+    "word3 word4 word5 word6 word7",
+    "word6 word7 word8 word9 word10",
+    "word9 word10 word11"
+  ]);
+});

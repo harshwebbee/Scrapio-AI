@@ -91,7 +91,9 @@ curl -X POST http://localhost:4000/api/crawls \
     "downloadVideos": false,
     "downloadDocuments": false,
     "exportType": "both",
-    "domainMode": "internal"
+    "domainMode": "internal",
+    "chunkSize": 800,
+    "chunkOverlap": 100
   }'
 ```
 
@@ -116,6 +118,7 @@ website-export/
   markdown/
   json/
     pages/
+    chunks.jsonl
   images/
   videos/
   documents/
@@ -130,7 +133,7 @@ The JSON export includes:
 - `pages`
 - `chunks`
 
-AI chunks target roughly 800 words with 100-word overlap.
+AI chunks default to roughly 800 words with 100-word overlap. `chunkSize` and `chunkOverlap` can be set per crawl, and JSONL chunk export is available with `exportType: "jsonl"` or `exportType: "both"`.
 
 ## MVP Notes
 

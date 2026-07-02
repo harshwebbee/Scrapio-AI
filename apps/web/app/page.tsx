@@ -28,6 +28,69 @@ type CrawlEvent = {
   failedReason: string | null;
 };
 
+type CrawlDiff = {
+  baselineCrawlId: string | null;
+  summary: {
+    newPages: number;
+    updatedPages: number;
+    removedPages: number;
+    unchangedPages: number;
+  };
+};
+
+type CrawlDetail = {
+  id: string;
+  url: string;
+  status: string;
+  createdAt: string;
+  completedAt: string | null;
+  chunkSize: number;
+  chunkOverlap: number;
+  summary: Progress & { chunks?: number };
+  diff: CrawlDiff | null;
+};
+
+type CrawlPageSummary = {
+  id: string;
+  url: string;
+  title: string | null;
+  wordCount: number;
+  statusCode: number | null;
+  links: number;
+  assets: number;
+  chunks: number;
+};
+
+type CrawlAnalytics = {
+  totals: {
+    pages: number;
+    links: number;
+    assets: number;
+    chunks: number;
+    words: number;
+    bytes: number;
+  };
+  links: {
+    internal: number;
+    external: number;
+  };
+  assets: {
+    images: number;
+    videos: number;
+    documents: number;
+    bytes: number;
+  };
+};
+
+type CrawlSearchResult = {
+  pageId: string;
+  pageUrl: string;
+  pageTitle: string | null;
+  chunkId: string | null;
+  snippet: string;
+  matchType: "page" | "chunk";
+};
+
 type ServiceHealth = {
   name: string;
   ok: boolean;
@@ -55,13 +118,21 @@ export default function Home() {
   const [downloadImages, setDownloadImages] = useState(true);
   const [downloadVideos, setDownloadVideos] = useState(false);
   const [downloadDocuments, setDownloadDocuments] = useState(false);
-  const [exportType, setExportType] = useState<"markdown" | "json" | "both">("both");
+  const [exportType, setExportType] = useState<"markdown" | "json" | "jsonl" | "both">("both");
   const [domainMode, setDomainMode] = useState<"internal" | "internal_external">("internal");
+  const [chunkSize, setChunkSize] = useState("800");
+  const [chunkOverlap, setChunkOverlap] = useState("100");
   const [crawl, setCrawl] = useState<CrawlEvent | null>(null);
   const [health, setHealth] = useState<SystemHealth | null>(null);
   const [healthError, setHealthError] = useState<AppError | null>(null);
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [error, setError] = useState<AppError | null>(null);
+  const [crawlDetail, setCrawlDetail] = useState<CrawlDetail | null>(null);
+  const [crawlPages, setCrawlPages] = useState<CrawlPageSummary[]>([]);
+  const [analytics, setAnalytics] = useState<CrawlAnalytics | null>(null);
+  const [searchQuery, setSearchQuery] = useState("");
+  const [searchResults, setSearchResults] = useState<CrawlSearchResult[]>([]);
+  const [isSearching, setIsSearching] = useState(false);
 
   useEffect(() => {
     let cancelled = false;
@@ -112,6 +183,41 @@ export default function Home() {
     };
   }, [crawl?.id]);
 
+  useEffect(() => {
+    if (!crawl?.id || crawl.status !== "completed") return;
+    let cancelled = false;
+
+    async function loadCrawlDetail() {
+      try {
+        const [detailResponse, pagesResponse, analyticsResponse] = await Promise.all([
+          fetch(`${apiUrl}/api/crawls/${crawl?.id}/detail`),
+          fetch(`${apiUrl}/api/crawls/${crawl?.id}/pages`),
+          fetch(`${apiUrl}/api/crawls/${crawl?.id}/analytics`)
+        ]);
+
+        if (!detailResponse.ok) throw await readApiError(detailResponse);
+        if (!pagesResponse.ok) throw await readApiError(pagesResponse);
+        if (!analyticsResponse.ok) throw await readApiError(analyticsResponse);
+
+        const detail = await detailResponse.json();
+        const pageBody = await pagesResponse.json();
+        const crawlAnalytics = await analyticsResponse.json();
+        if (!cancelled) {
+          setCrawlDetail(detail);
+          setCrawlPages(Array.isArray(pageBody.pages) ? pageBody.pages : []);
+          setAnalytics(crawlAnalytics);
+        }
+      } catch (err) {
+        if (!cancelled) setError(normalizeClientError(err));
+      }
+    }
+
+    loadCrawlDetail();
+    return () => {
+      cancelled = true;
+    };
+  }, [crawl?.id, crawl?.status]);
+
   const completion = useMemo(() => {
     const processed = crawl?.progress.pagesProcessed ?? 0;
     const remaining = crawl?.progress.remainingQueue ?? 0;
@@ -136,7 +242,9 @@ export default function Home() {
           downloadVideos,
           downloadDocuments,
           exportType,
-          domainMode
+          domainMode,
+          chunkSize: Number(chunkSize),
+          chunkOverlap: Number(chunkOverlap)
         })
       });
 
@@ -146,10 +254,35 @@ export default function Home() {
 
       const body = await response.json();
       setCrawl({ id: body.id, status: body.status, progress: {}, result: null, failedReason: null });
+      setCrawlDetail(null);
+      setCrawlPages([]);
+      setAnalytics(null);
+      setSearchQuery("");
+      setSearchResults([]);
     } catch (err) {
       setError(normalizeClientError(err));
     } finally {
       setIsSubmitting(false);
+    }
+  }
+
+  async function runSearch() {
+    if (!crawl?.id || !searchQuery.trim()) {
+      setSearchResults([]);
+      return;
+    }
+
+    setIsSearching(true);
+    setError(null);
+    try {
+      const response = await fetch(`${apiUrl}/api/crawls/${crawl.id}/search?q=${encodeURIComponent(searchQuery)}`);
+      if (!response.ok) throw await readApiError(response);
+      const body = await response.json();
+      setSearchResults(Array.isArray(body.results) ? body.results : []);
+    } catch (err) {
+      setError(normalizeClientError(err));
+    } finally {
+      setIsSearching(false);
     }
   }
 
@@ -233,7 +366,34 @@ export default function Home() {
             <legend>Export</legend>
             <Segment label="Markdown" active={exportType === "markdown"} onClick={() => setExportType("markdown")} />
             <Segment label="JSON" active={exportType === "json"} onClick={() => setExportType("json")} />
+            <Segment label="JSONL" active={exportType === "jsonl"} onClick={() => setExportType("jsonl")} />
             <Segment label="Both" active={exportType === "both"} onClick={() => setExportType("both")} />
+          </fieldset>
+
+          <fieldset className="field-group">
+            <legend>Chunks</legend>
+            <label className="mini-field">
+              Size
+              <input
+                type="number"
+                min="200"
+                max="2000"
+                step="50"
+                value={chunkSize}
+                onChange={(event) => setChunkSize(event.target.value)}
+              />
+            </label>
+            <label className="mini-field">
+              Overlap
+              <input
+                type="number"
+                min="0"
+                max="500"
+                step="25"
+                value={chunkOverlap}
+                onChange={(event) => setChunkOverlap(event.target.value)}
+              />
+            </label>
           </fieldset>
 
           <fieldset className="field-group">
@@ -284,6 +444,74 @@ export default function Home() {
           <a className={`download ${ready ? "" : "disabled"}`} href={ready ? `${apiUrl}/api/crawls/${crawl.id}/download` : undefined}>
             Download ZIP
           </a>
+
+          {crawlDetail ? (
+            <section className="intelligence">
+              <div>
+                <p className="eyebrow">Crawl intelligence</p>
+                <h2>{crawlDetail.diff?.baselineCrawlId ? "Compared with previous crawl" : "First crawl snapshot"}</h2>
+              </div>
+
+              <div className="stats diff-stats">
+                <Stat label="New pages" value={crawlDetail.diff?.summary.newPages ?? crawlPages.length} />
+                <Stat label="Updated" value={crawlDetail.diff?.summary.updatedPages ?? 0} />
+                <Stat label="Removed" value={crawlDetail.diff?.summary.removedPages ?? 0} />
+                <Stat label="Unchanged" value={crawlDetail.diff?.summary.unchangedPages ?? 0} />
+              </div>
+
+              {analytics ? (
+                <div className="stats analytics-stats">
+                  <Stat label="Words" value={analytics.totals.words} />
+                  <Stat label="Links" value={analytics.totals.links} />
+                  <Stat label="External links" value={analytics.links.external} />
+                  <Stat label="Asset bytes" value={`${Math.round(analytics.assets.bytes / 1024)} KB`} />
+                </div>
+              ) : null}
+
+              <div className="search-box">
+                <input
+                  value={searchQuery}
+                  onChange={(event) => setSearchQuery(event.target.value)}
+                  onKeyDown={(event) => {
+                    if (event.key === "Enter") {
+                      event.preventDefault();
+                      runSearch();
+                    }
+                  }}
+                  placeholder="Search crawled content"
+                />
+                <button type="button" onClick={runSearch} disabled={isSearching}>
+                  {isSearching ? "Searching" : "Search"}
+                </button>
+              </div>
+
+              {searchResults.length > 0 ? (
+                <div className="search-results">
+                  {searchResults.map((result) => (
+                    <div className="search-result" key={`${result.pageId}-${result.chunkId ?? "page"}`}>
+                      <strong>{result.pageTitle || result.pageUrl}</strong>
+                      <span>{result.snippet}</span>
+                      <small>{result.matchType === "chunk" ? `Chunk ${result.chunkId}` : "Page match"}</small>
+                    </div>
+                  ))}
+                </div>
+              ) : null}
+
+              <div className="page-table">
+                {crawlPages.slice(0, 6).map((page) => (
+                  <div className="page-row" key={page.id}>
+                    <div>
+                      <strong>{page.title || page.url}</strong>
+                      <span>{page.url}</span>
+                    </div>
+                    <small>{page.wordCount} words</small>
+                    <small>{page.links} links</small>
+                    <small>{page.chunks} chunks</small>
+                  </div>
+                ))}
+              </div>
+            </section>
+          ) : null}
         </section>
       </form>
     </main>
