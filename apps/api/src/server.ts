@@ -4,12 +4,25 @@ import archiver from "archiver";
 import cors from "cors";
 import express from "express";
 import http from "node:http";
+import type { Job } from "bullmq";
 import { Server } from "socket.io";
 import { env } from "./config.js";
+import { ensureDatabaseSchema } from "./db.js";
 import { ApiError, errorHandler, sendError } from "./errors.js";
-import { checkRedis, getSystemHealth } from "./health.js";
+import { checkPostgres, checkRedis, getSystemHealth } from "./health.js";
+import {
+  createCrawlRecord,
+  getPersistedCrawlEvent,
+  isPersistedCrawlCompleted,
+  markCrawlFailed,
+  type PersistedCrawlEvent
+} from "./persistence.js";
 import { crawlQueue } from "./queue.js";
-import { createCrawlSchema } from "./schema.js";
+import { createCrawlSchema, type CreateCrawlInput } from "./schema.js";
+
+await ensureDatabaseSchema().catch((error) => {
+  console.warn("Database schema could not be initialized.", error);
+});
 
 const app = express();
 const server = http.createServer(app);
@@ -38,7 +51,7 @@ app.get("/api/system/health", async (_req, res, next) => {
 app.post("/api/crawls", async (req, res, next) => {
   try {
     const input = createCrawlSchema.parse(req.body);
-    const redis = await checkRedis();
+    const [redis, postgres] = await Promise.all([checkRedis(), checkPostgres()]);
     if (!redis.ok) {
       return sendError(
         res,
@@ -50,8 +63,27 @@ app.post("/api/crawls", async (req, res, next) => {
         )
       );
     }
-    const job = await crawlQueue.add("crawl", input);
-    res.status(201).json({ id: job.id, status: "queued" });
+    if (!postgres.ok) {
+      return sendError(
+        res,
+        new ApiError(
+          503,
+          "DATABASE_UNAVAILABLE",
+          "Crawls cannot start because PostgreSQL is offline.",
+          postgres.action ?? "Run `npm run infra:up`, then try again."
+        )
+      );
+    }
+
+    await ensureDatabaseSchema();
+    const crawlId = await createCrawlRecord(input);
+    try {
+      const job = await crawlQueue.add("crawl", input, { jobId: crawlId });
+      res.status(201).json({ id: job.id, status: "queued" });
+    } catch (error) {
+      await markCrawlFailed(crawlId, error instanceof Error ? error.message : "Queue creation failed").catch(() => undefined);
+      throw error;
+    }
   } catch (error) {
     next(error);
   }
@@ -59,17 +91,9 @@ app.post("/api/crawls", async (req, res, next) => {
 
 app.get("/api/crawls/:id", async (req, res, next) => {
   try {
-    const job = await crawlQueue.getJob(req.params.id);
-    if (!job) throw new ApiError(404, "CRAWL_NOT_FOUND", "That crawl could not be found.", "Start a new crawl.");
-    const state = await job.getState();
-    const progress = job.progress || {};
-    res.json({
-      id: job.id,
-      status: state,
-      progress,
-      result: job.returnvalue ?? null,
-      failedReason: job.failedReason ?? null
-    });
+    const event = await getCrawlEvent(req.params.id);
+    if (!event) throw new ApiError(404, "CRAWL_NOT_FOUND", "That crawl could not be found.", "Start a new crawl.");
+    res.json(event);
   } catch (error) {
     next(error);
   }
@@ -78,9 +102,12 @@ app.get("/api/crawls/:id", async (req, res, next) => {
 app.get("/api/crawls/:id/download", async (req, res, next) => {
   try {
     const job = await crawlQueue.getJob(req.params.id);
-    if (!job) throw new ApiError(404, "CRAWL_NOT_FOUND", "That crawl could not be found.", "Start a new crawl.");
-    const state = await job.getState();
-    if (state !== "completed") {
+    const state = job ? await job.getState() : null;
+    const isCompleted = state === "completed" || (!job && (await isPersistedCrawlCompleted(req.params.id)));
+    if (!job && !isCompleted) {
+      throw new ApiError(404, "CRAWL_NOT_FOUND", "That crawl could not be found.", "Start a new crawl.");
+    }
+    if (!isCompleted) {
       throw new ApiError(409, "EXPORT_NOT_READY", "The export is not ready yet.", "Wait for the crawl to finish.");
     }
 
@@ -104,16 +131,8 @@ io.on("connection", (socket) => {
   socket.on("watch:crawl", async (jobId: string) => {
     try {
       socket.join(jobId);
-      const job = await crawlQueue.getJob(jobId);
-      if (job) {
-        socket.emit("crawl:progress", {
-          id: job.id,
-          status: await job.getState(),
-          progress: job.progress || {},
-          result: job.returnvalue ?? null,
-          failedReason: job.failedReason ?? null
-        });
-      }
+      const event = await getCrawlEvent(jobId);
+      if (event) socket.emit("crawl:progress", event);
     } catch {
       socket.emit("crawl:error", {
         code: "REQUEST_FAILED",
@@ -129,15 +148,9 @@ setInterval(async () => {
   await Promise.all(
     rooms.map(async (jobId) => {
       try {
-        const job = await crawlQueue.getJob(jobId);
-        if (!job) return;
-        io.to(jobId).emit("crawl:progress", {
-          id: job.id,
-          status: await job.getState(),
-          progress: job.progress || {},
-          result: job.returnvalue ?? null,
-          failedReason: job.failedReason ?? null
-        });
+        const event = await getCrawlEvent(jobId);
+        if (!event) return;
+        io.to(jobId).emit("crawl:progress", event);
       } catch {
         io.to(jobId).emit("crawl:error", {
           code: "REQUEST_FAILED",
@@ -150,6 +163,22 @@ setInterval(async () => {
 }, 1000);
 
 app.use(errorHandler);
+
+async function getCrawlEvent(jobId: string): Promise<PersistedCrawlEvent | null> {
+  const job = await crawlQueue.getJob(jobId);
+  if (job) return formatJobEvent(job);
+  return getPersistedCrawlEvent(jobId);
+}
+
+async function formatJobEvent(job: Job<CreateCrawlInput>): Promise<PersistedCrawlEvent> {
+  return {
+    id: String(job.id),
+    status: await job.getState(),
+    progress: job.progress && typeof job.progress === "object" ? (job.progress as Record<string, unknown>) : {},
+    result: job.returnvalue ?? null,
+    failedReason: job.failedReason ?? null
+  };
+}
 
 server.listen(env.port, () => {
   console.log(`Scrapio API listening on http://localhost:${env.port}`);

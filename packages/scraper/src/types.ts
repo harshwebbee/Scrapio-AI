@@ -44,6 +44,9 @@ export type ExtractedPage = {
   title: string;
   content: string;
   markdown: string;
+  markdownPath?: string;
+  jsonPath?: string;
+  statusCode?: number;
   headings: string[];
   links: ExtractedLink[];
   images: ExtractedAsset[];
@@ -55,6 +58,7 @@ export type ExtractedPage = {
 export type AiChunk = {
   chunk_id: string;
   page: string;
+  page_url?: string;
   content: string;
   embedding_ready: true;
 };

@@ -155,8 +155,9 @@ export default function Home() {
 
   const ready = crawl?.status === "completed";
   const redisReady = health?.checks.find((check) => check.name === "redis")?.ok ?? false;
+  const servicesReady = health?.ok ?? false;
   const apiReady = !healthError;
-  const canSubmit = apiReady && redisReady && !isSubmitting;
+  const canSubmit = apiReady && servicesReady && !isSubmitting;
 
   return (
     <main className="shell">
@@ -246,7 +247,7 @@ export default function Home() {
           </fieldset>
 
           <button className="primary-button" disabled={!canSubmit} type="submit">
-            {isSubmitting ? "Starting crawl" : redisReady ? "Start crawl" : "Start Redis first"}
+            {isSubmitting ? "Starting crawl" : redisReady && servicesReady ? "Start crawl" : "Start services first"}
           </button>
 
           {error ? <ErrorNotice error={error} /> : null}

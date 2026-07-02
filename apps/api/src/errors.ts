@@ -4,6 +4,7 @@ import { ZodError } from "zod";
 export type ErrorCode =
   | "VALIDATION_ERROR"
   | "REDIS_UNAVAILABLE"
+  | "DATABASE_UNAVAILABLE"
   | "CRAWL_NOT_FOUND"
   | "EXPORT_NOT_READY"
   | "EXPORT_NOT_FOUND"

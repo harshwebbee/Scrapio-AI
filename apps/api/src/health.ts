@@ -2,6 +2,7 @@ import fs from "node:fs/promises";
 import net from "node:net";
 import { chromium } from "playwright";
 import { env } from "./config.js";
+import { checkDatabaseConnection, hasDatabaseConfig } from "./db.js";
 
 export type ServiceHealth = {
   name: string;
@@ -29,8 +30,8 @@ export async function checkRedis(): Promise<ServiceHealth> {
   return checkTcpUrl("redis", env.redisUrl);
 }
 
-async function checkPostgres(): Promise<ServiceHealth> {
-  if (!env.databaseUrl) {
+export async function checkPostgres(): Promise<ServiceHealth> {
+  if (!hasDatabaseConfig()) {
     return {
       name: "postgres",
       ok: false,
@@ -38,7 +39,20 @@ async function checkPostgres(): Promise<ServiceHealth> {
       action: "Set DATABASE_URL or start local infrastructure with `npm run infra:up`."
     };
   }
-  return checkTcpUrl("postgres", env.databaseUrl);
+
+  try {
+    await checkDatabaseConnection();
+    const url = new URL(env.databaseUrl);
+    const port = Number(url.port || defaultPort(url.protocol));
+    return { name: "postgres", ok: true, message: `${url.hostname}:${port}` };
+  } catch {
+    return {
+      name: "postgres",
+      ok: false,
+      message: "PostgreSQL is not reachable.",
+      action: "Run `npm run infra:up`, then refresh."
+    };
+  }
 }
 
 async function checkStorage(): Promise<ServiceHealth> {
@@ -73,7 +87,7 @@ async function checkTcpUrl(name: string, rawUrl: string): Promise<ServiceHealth>
     const port = Number(url.port || defaultPort(url.protocol));
     await connect(url.hostname, port);
     return { name, ok: true, message: `${url.hostname}:${port}` };
-  } catch (error) {
+  } catch {
     return {
       name,
       ok: false,

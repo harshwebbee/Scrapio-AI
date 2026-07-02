@@ -45,6 +45,12 @@ npm run infra:down
 
 The PostgreSQL container initializes with [db/schema.sql](db/schema.sql).
 
+To run the full local stack in Docker:
+
+```bash
+npm run stack:up
+```
+
 ## Run Locally
 
 Start Redis/PostgreSQL first, then run these in separate terminals:
@@ -109,6 +115,7 @@ Each crawl writes to `storage/JOB_ID`:
 website-export/
   markdown/
   json/
+    pages/
   images/
   videos/
   documents/
@@ -127,7 +134,7 @@ AI chunks target roughly 800 words with 100-word overlap.
 
 ## MVP Notes
 
-Phase 1 has no authentication. PostgreSQL table definitions from the SRD are not yet wired because the MVP job state is held in BullMQ/Redis and export artifacts are stored on disk. The next durable step is adding PostgreSQL records for crawls, pages, and assets.
+Phase 1 has no authentication. Crawl lifecycle and extracted pages, page versions, assets, links, chunks, snapshots, and export records are persisted in PostgreSQL, while BullMQ/Redis still handle background execution and export artifacts remain on disk.
 
 ## Roadmap
 

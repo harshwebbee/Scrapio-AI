@@ -14,8 +14,11 @@
     "worker": "npm run worker -w apps/api",
     "infra:up": "docker compose up -d redis postgres",
     "infra:down": "docker compose down",
+    "stack:up": "docker compose up -d redis postgres api worker web",
+    "stack:down": "docker compose down",
     "build": "npm run build -w packages/scraper && npm run build -w apps/api && npm run build -w apps/web",
-    "typecheck": "tsc --noEmit",
+    "typecheck": "npm run build -w packages/scraper && tsc --noEmit",
+    "test": "npm run build -w packages/scraper && node --test packages/scraper/dist/utils.test.js",
     "lint": "eslint . --ext .ts,.tsx"
   },
   "dependencies": {
@@ -29,6 +32,7 @@
     "ioredis": "^5.4.1",
     "jsdom": "^24.1.1",
     "next": "^14.2.5",
+    "pg": "^8.22.0",
     "playwright": "^1.45.3",
     "react": "^18.3.1",
     "react-dom": "^18.3.1",
@@ -42,6 +46,7 @@
     "@types/cors": "^2.8.17",
     "@types/express": "^4.17.21",
     "@types/node": "^20.14.10",
+    "@types/pg": "^8.20.0",
     "@types/react": "^18.3.3",
     "@types/react-dom": "^18.3.0",
     "@types/turndown": "^5.0.5",

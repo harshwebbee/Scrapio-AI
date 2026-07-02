@@ -32,11 +32,19 @@ export function pageSlug(pageUrl: string): string {
 
 export function safeFilename(assetUrl: string): string {
   const url = new URL(assetUrl);
-  const base = path.basename(url.pathname) || "asset";
+  const base = decodePathSegment(path.basename(url.pathname)) || "asset";
   const ext = path.extname(base);
   const name = (ext ? base.slice(0, -ext.length) : base).replace(/[^a-z0-9._-]+/gi, "-") || "asset";
   const hash = crypto.createHash("sha1").update(assetUrl).digest("hex").slice(0, 8);
   return `${name}-${hash}${ext}`;
+}
+
+function decodePathSegment(segment: string): string {
+  try {
+    return decodeURIComponent(segment);
+  } catch {
+    return segment;
+  }
 }
 
 export function classifyAsset(assetUrl: string): "image" | "video" | "document" | null {

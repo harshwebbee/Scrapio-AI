@@ -43,6 +43,7 @@ export async function runCrawl(config: CrawlConfig, onProgress?: ProgressCallbac
 
       const html = await page.content();
       const extracted = extractPage(html, item.url, rootUrl);
+      extracted.statusCode = response.status();
       if (config.domainMode === "internal") {
         extracted.links = extracted.links.filter((link) => link.type === "internal");
       }
@@ -88,6 +89,7 @@ async function prepareOutput(outputDir: string): Promise<void> {
   await Promise.all([
     fs.mkdir(path.join(outputDir, "markdown"), { recursive: true }),
     fs.mkdir(path.join(outputDir, "json"), { recursive: true }),
+    fs.mkdir(path.join(outputDir, "json", "pages"), { recursive: true }),
     fs.mkdir(path.join(outputDir, "images"), { recursive: true }),
     fs.mkdir(path.join(outputDir, "videos"), { recursive: true }),
     fs.mkdir(path.join(outputDir, "documents"), { recursive: true }),
@@ -126,13 +128,21 @@ async function writeExports(rootUrl: string, pages: ExtractedPage[], chunks: AiC
   if (config.exportType === "markdown" || config.exportType === "both") {
     await Promise.all(
       pages.map((page) => {
+        page.markdownPath = path.join("markdown", `${slugForPage(page.url)}.md`);
         const markdown = `---\nurl: ${page.url}\ntitle: ${JSON.stringify(page.title)}\n---\n\n${page.markdown}\n`;
-        return fs.writeFile(path.join(config.outputDir, "markdown", `${slugForPage(page.url)}.md`), markdown);
+        return fs.writeFile(path.join(config.outputDir, page.markdownPath), markdown);
       })
     );
   }
 
   if (config.exportType === "json" || config.exportType === "both") {
+    await Promise.all(
+      pages.map((page) => {
+        page.jsonPath = path.join("json", "pages", `${slugForPage(page.url)}.json`);
+        return fs.writeFile(path.join(config.outputDir, page.jsonPath), JSON.stringify(page, null, 2));
+      })
+    );
+
     const knowledgeBase = {
       website: rootUrl,
       crawl_date: crawlDate,
@@ -155,6 +165,7 @@ function buildChunks(pages: ExtractedPage[]): AiChunk[] {
       chunks.push({
         chunk_id: String(nextIndex + offset).padStart(3, "0"),
         page: page.path,
+        page_url: page.url,
         content,
         embedding_ready: true
       });
