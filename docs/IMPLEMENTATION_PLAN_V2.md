@@ -238,11 +238,13 @@ Implementation notes:
 3. Add API/UI health checks so users know when Redis, worker, or Playwright are missing.
 4. Add crawl snapshots and content hashing.
 5. Add crawl diff report.
-6. Add keyword search.
-7. Add JSONL export.
-8. Add OpenAI embedding provider.
-9. Add semantic search.
-10. Add website summary AI job.
+6. Add duplicate content reports.
+7. Add crawl tree API and dashboard view.
+8. Add keyword search.
+9. Add JSONL export.
+10. Add OpenAI embedding provider.
+11. Add semantic search.
+12. Add website summary AI job.
 
 ## Definition Of Done For v2 Features
 

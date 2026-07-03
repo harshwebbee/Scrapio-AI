@@ -82,6 +82,44 @@ type CrawlAnalytics = {
   };
 };
 
+type DuplicateReport = {
+  duplicateTitles: Array<{
+    title: string;
+    count: number;
+    pages: Array<{ pageId: string; url: string }>;
+  }>;
+  duplicatePages: Array<{
+    contentHash: string;
+    count: number;
+    pages: Array<{ pageId: string; url: string; title: string | null }>;
+  }>;
+  duplicateChunks: Array<{
+    fingerprint: string;
+    count: number;
+    pages: Array<{ pageId: string; url: string; chunkId: string }>;
+  }>;
+};
+
+type CrawlTree = {
+  rootUrl: string;
+  nodes: Array<{
+    id: string;
+    url: string;
+    title: string | null;
+    path: string;
+    depth: number | null;
+    wordCount: number;
+    links: number;
+    assets: number;
+    chunks: number;
+  }>;
+  edges: Array<{
+    source: string;
+    target: string;
+    text: string | null;
+  }>;
+};
+
 type CrawlSearchResult = {
   pageId: string;
   pageUrl: string;
@@ -130,6 +168,8 @@ export default function Home() {
   const [crawlDetail, setCrawlDetail] = useState<CrawlDetail | null>(null);
   const [crawlPages, setCrawlPages] = useState<CrawlPageSummary[]>([]);
   const [analytics, setAnalytics] = useState<CrawlAnalytics | null>(null);
+  const [duplicates, setDuplicates] = useState<DuplicateReport | null>(null);
+  const [crawlTree, setCrawlTree] = useState<CrawlTree | null>(null);
   const [searchQuery, setSearchQuery] = useState("");
   const [searchResults, setSearchResults] = useState<CrawlSearchResult[]>([]);
   const [isSearching, setIsSearching] = useState(false);
@@ -194,18 +234,28 @@ export default function Home() {
           fetch(`${apiUrl}/api/crawls/${crawl?.id}/pages`),
           fetch(`${apiUrl}/api/crawls/${crawl?.id}/analytics`)
         ]);
+        const [duplicatesResponse, treeResponse] = await Promise.all([
+          fetch(`${apiUrl}/api/crawls/${crawl?.id}/duplicates`),
+          fetch(`${apiUrl}/api/crawls/${crawl?.id}/tree`)
+        ]);
 
         if (!detailResponse.ok) throw await readApiError(detailResponse);
         if (!pagesResponse.ok) throw await readApiError(pagesResponse);
         if (!analyticsResponse.ok) throw await readApiError(analyticsResponse);
+        if (!duplicatesResponse.ok) throw await readApiError(duplicatesResponse);
+        if (!treeResponse.ok) throw await readApiError(treeResponse);
 
         const detail = await detailResponse.json();
         const pageBody = await pagesResponse.json();
         const crawlAnalytics = await analyticsResponse.json();
+        const duplicateReport = await duplicatesResponse.json();
+        const tree = await treeResponse.json();
         if (!cancelled) {
           setCrawlDetail(detail);
           setCrawlPages(Array.isArray(pageBody.pages) ? pageBody.pages : []);
           setAnalytics(crawlAnalytics);
+          setDuplicates(duplicateReport);
+          setCrawlTree(tree);
         }
       } catch (err) {
         if (!cancelled) setError(normalizeClientError(err));
@@ -257,6 +307,8 @@ export default function Home() {
       setCrawlDetail(null);
       setCrawlPages([]);
       setAnalytics(null);
+      setDuplicates(null);
+      setCrawlTree(null);
       setSearchQuery("");
       setSearchResults([]);
     } catch (err) {
@@ -468,6 +520,31 @@ export default function Home() {
                 </div>
               ) : null}
 
+              {duplicates ? (
+                <div className="insight-grid">
+                  <InsightCard
+                    label="Duplicate titles"
+                    value={duplicates.duplicateTitles.length}
+                    detail={duplicates.duplicateTitles[0]?.title ?? "No repeated titles found"}
+                  />
+                  <InsightCard
+                    label="Duplicate pages"
+                    value={duplicates.duplicatePages.length}
+                    detail={duplicates.duplicatePages[0]?.pages.map((page) => page.url).join(", ") ?? "No identical pages found"}
+                  />
+                  <InsightCard
+                    label="Duplicate chunks"
+                    value={duplicates.duplicateChunks.length}
+                    detail={duplicates.duplicateChunks[0]?.pages.map((page) => page.url).join(", ") ?? "No repeated chunks found"}
+                  />
+                  <InsightCard
+                    label="Tree edges"
+                    value={crawlTree?.edges.length ?? 0}
+                    detail={crawlTree ? `${crawlTree.nodes.length} pages mapped from ${crawlTree.rootUrl}` : "Tree unavailable"}
+                  />
+                </div>
+              ) : null}
+
               <div className="search-box">
                 <input
                   value={searchQuery}
@@ -510,6 +587,26 @@ export default function Home() {
                   </div>
                 ))}
               </div>
+
+              {crawlTree ? (
+                <div className="tree-list">
+                  {crawlTree.nodes
+                    .slice()
+                    .sort((a, b) => (a.depth ?? 999) - (b.depth ?? 999) || a.path.localeCompare(b.path))
+                    .slice(0, 10)
+                    .map((node) => (
+                      <div className="tree-row" key={node.id}>
+                        <span style={{ paddingLeft: `${Math.min(node.depth ?? 0, 5) * 14}px` }}>
+                          {node.depth === null ? "Orphan" : `Level ${node.depth}`}
+                        </span>
+                        <strong>{node.title || node.path}</strong>
+                        <small>
+                          {node.links} links · {node.assets} assets · {node.chunks} chunks
+                        </small>
+                      </div>
+                    ))}
+                </div>
+              ) : null}
             </section>
           ) : null}
         </section>
@@ -604,6 +701,16 @@ function Stat({ label, value }: { label: string; value: string | number }) {
     <div className="stat">
       <span>{label}</span>
       <strong>{value}</strong>
+    </div>
+  );
+}
+
+function InsightCard({ label, value, detail }: { label: string; value: string | number; detail: string }) {
+  return (
+    <div className="insight-card">
+      <span>{label}</span>
+      <strong>{value}</strong>
+      <small>{detail}</small>
     </div>
   );
 }

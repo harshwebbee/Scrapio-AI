@@ -103,6 +103,17 @@ Check status:
 curl http://localhost:4000/api/crawls/JOB_ID
 ```
 
+Retrieve crawl intelligence:
+
+```bash
+curl http://localhost:4000/api/crawls/JOB_ID/detail
+curl http://localhost:4000/api/crawls/JOB_ID/pages
+curl http://localhost:4000/api/crawls/JOB_ID/analytics
+curl http://localhost:4000/api/crawls/JOB_ID/duplicates
+curl http://localhost:4000/api/crawls/JOB_ID/tree
+curl "http://localhost:4000/api/crawls/JOB_ID/search?q=pricing"
+```
+
 Download export:
 
 ```bash
@@ -138,6 +149,8 @@ AI chunks default to roughly 800 words with 100-word overlap. `chunkSize` and `c
 ## MVP Notes
 
 Phase 1 has no authentication. Crawl lifecycle and extracted pages, page versions, assets, links, chunks, snapshots, and export records are persisted in PostgreSQL, while BullMQ/Redis still handle background execution and export artifacts remain on disk.
+
+Phase 2 crawl intelligence has started with content hashes, crawl snapshots, crawl diffs, duplicate title/page/chunk reports, and crawl tree APIs/UI. True incremental crawl skipping and interactive graph visualization are still future work.
 
 ## Roadmap
 

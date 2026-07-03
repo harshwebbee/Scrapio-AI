@@ -108,6 +108,45 @@ export type CrawlSearchResult = {
   matchType: "page" | "chunk";
 };
 
+export type DuplicateContentReport = {
+  duplicateTitles: Array<{
+    title: string;
+    count: number;
+    pages: Array<{ pageId: string; url: string }>;
+  }>;
+  duplicatePages: Array<{
+    contentHash: string;
+    count: number;
+    pages: Array<{ pageId: string; url: string; title: string | null }>;
+  }>;
+  duplicateChunks: Array<{
+    fingerprint: string;
+    count: number;
+    pages: Array<{ pageId: string; url: string; chunkId: string }>;
+  }>;
+};
+
+export type CrawlTree = {
+  rootUrl: string;
+  nodes: Array<{
+    id: string;
+    url: string;
+    title: string | null;
+    path: string;
+    depth: number | null;
+    wordCount: number;
+    statusCode: number | null;
+    links: number;
+    assets: number;
+    chunks: number;
+  }>;
+  edges: Array<{
+    source: string;
+    target: string;
+    text: string | null;
+  }>;
+};
+
 export async function createCrawlRecord(input: CreateCrawlInput): Promise<string> {
   const result = await query<{ id: string }>(
     `
@@ -560,6 +599,167 @@ export async function searchCrawl(crawlId: string, searchQuery: string): Promise
   }));
 }
 
+export async function getDuplicateContentReport(crawlId: string): Promise<DuplicateContentReport | null> {
+  const crawlExists = await query<{ exists: boolean }>("SELECT EXISTS (SELECT 1 FROM crawls WHERE id = $1)", [crawlId]);
+  if (!crawlExists.rows[0]?.exists) return null;
+
+  const [titles, pages, chunks] = await Promise.all([
+    query<{
+      title_key: string;
+      display_title: string;
+      pages: Array<{ pageId: string; url: string }>;
+      count: string;
+    }>(
+      `
+        SELECT lower(trim(title)) AS title_key,
+               min(title) AS display_title,
+               jsonb_agg(jsonb_build_object('pageId', id, 'url', url) ORDER BY url) AS pages,
+               COUNT(*) AS count
+        FROM pages
+        WHERE crawl_id = $1
+          AND title IS NOT NULL
+          AND trim(title) <> ''
+        GROUP BY lower(trim(title))
+        HAVING COUNT(*) > 1
+        ORDER BY COUNT(*) DESC, min(title)
+      `,
+      [crawlId]
+    ),
+    query<{
+      content_hash: string;
+      pages: Array<{ pageId: string; url: string; title: string | null }>;
+      count: string;
+    }>(
+      `
+        SELECT content_hash,
+               jsonb_agg(jsonb_build_object('pageId', id, 'url', url, 'title', title) ORDER BY url) AS pages,
+               COUNT(*) AS count
+        FROM pages
+        WHERE crawl_id = $1
+          AND content_hash IS NOT NULL
+        GROUP BY content_hash
+        HAVING COUNT(*) > 1
+        ORDER BY COUNT(*) DESC
+      `,
+      [crawlId]
+    ),
+    query<{
+      fingerprint: string;
+      pages: Array<{ pageId: string; url: string; chunkId: string }>;
+      count: string;
+    }>(
+      `
+        SELECT md5(regexp_replace(lower(trim(ch.content)), '\\s+', ' ', 'g')) AS fingerprint,
+               jsonb_agg(
+                 jsonb_build_object('pageId', p.id, 'url', p.url, 'chunkId', ch.chunk_id)
+                 ORDER BY p.url, ch.chunk_id
+               ) AS pages,
+               COUNT(*) AS count
+        FROM chunks ch
+        JOIN pages p ON p.id = ch.page_id
+        WHERE p.crawl_id = $1
+          AND length(trim(ch.content)) >= 120
+        GROUP BY md5(regexp_replace(lower(trim(ch.content)), '\\s+', ' ', 'g'))
+        HAVING COUNT(*) > 1
+        ORDER BY COUNT(*) DESC
+        LIMIT 25
+      `,
+      [crawlId]
+    )
+  ]);
+
+  return {
+    duplicateTitles: titles.rows.map((row) => ({
+      title: row.display_title,
+      count: Number(row.count),
+      pages: row.pages
+    })),
+    duplicatePages: pages.rows.map((row) => ({
+      contentHash: row.content_hash,
+      count: Number(row.count),
+      pages: row.pages
+    })),
+    duplicateChunks: chunks.rows.map((row) => ({
+      fingerprint: row.fingerprint,
+      count: Number(row.count),
+      pages: row.pages
+    }))
+  };
+}
+
+export async function getCrawlTree(crawlId: string): Promise<CrawlTree | null> {
+  const detail = await getCrawlDetail(crawlId);
+  if (!detail) return null;
+
+  const [nodes, edges] = await Promise.all([
+    listCrawlPages(crawlId),
+    query<{
+      source_id: string;
+      target_id: string;
+      text: string | null;
+    }>(
+      `
+        SELECT source.id AS source_id,
+               target.id AS target_id,
+               min(NULLIF(trim(l.text), '')) AS text
+        FROM links l
+        JOIN pages source ON source.id = l.source_page_id
+        JOIN pages target ON target.crawl_id = l.crawl_id
+                         AND target.url = l.target_url
+        WHERE l.crawl_id = $1
+          AND l.link_type = 'internal'
+        GROUP BY source.id, target.id
+        ORDER BY source.id, target.id
+      `,
+      [crawlId]
+    )
+  ]);
+
+  const adjacency = new Map<string, string[]>();
+  for (const edge of edges.rows) {
+    const targets = adjacency.get(edge.source_id) ?? [];
+    targets.push(edge.target_id);
+    adjacency.set(edge.source_id, targets);
+  }
+
+  const root = nodes.find((node) => node.url === detail.url) ?? nodes[0];
+  const depths = new Map<string, number>();
+  if (root) {
+    const queue: Array<{ id: string; depth: number }> = [{ id: root.id, depth: 0 }];
+    depths.set(root.id, 0);
+
+    while (queue.length > 0) {
+      const current = queue.shift()!;
+      for (const target of adjacency.get(current.id) ?? []) {
+        if (depths.has(target)) continue;
+        depths.set(target, current.depth + 1);
+        queue.push({ id: target, depth: current.depth + 1 });
+      }
+    }
+  }
+
+  return {
+    rootUrl: detail.url,
+    nodes: nodes.map((node) => ({
+      id: node.id,
+      url: node.url,
+      title: node.title,
+      path: safePath(node.url),
+      depth: depths.get(node.id) ?? null,
+      wordCount: node.wordCount,
+      statusCode: node.statusCode,
+      links: node.links,
+      assets: node.assets,
+      chunks: node.chunks
+    })),
+    edges: edges.rows.map((edge) => ({
+      source: edge.source_id,
+      target: edge.target_id,
+      text: edge.text
+    }))
+  };
+}
+
 async function clearPreviousCrawlArtifacts(client: PoolClient, crawlId: string): Promise<void> {
   await client.query("DELETE FROM crawl_diffs WHERE crawl_id = $1", [crawlId]);
   await client.query("DELETE FROM assets WHERE crawl_id = $1", [crawlId]);
@@ -901,4 +1101,12 @@ export function buildCrawlDiff(
 
 function escapeLikePattern(value: string): string {
   return value.replace(/[\\%_]/g, "\\$&");
+}
+
+function safePath(value: string): string {
+  try {
+    return new URL(value).pathname || "/";
+  } catch {
+    return value;
+  }
 }

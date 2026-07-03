@@ -14,6 +14,8 @@ import {
   createCrawlRecord,
   getCrawlAnalytics,
   getCrawlDetail,
+  getCrawlTree,
+  getDuplicateContentReport,
   getPersistedCrawlEvent,
   isPersistedCrawlCompleted,
   listCrawlPages,
@@ -129,6 +131,26 @@ app.get("/api/crawls/:id/analytics", async (req, res, next) => {
     const analytics = await getCrawlAnalytics(req.params.id);
     if (!analytics) throw new ApiError(404, "CRAWL_NOT_FOUND", "That crawl could not be found.", "Start a new crawl.");
     res.json(analytics);
+  } catch (error) {
+    next(error);
+  }
+});
+
+app.get("/api/crawls/:id/duplicates", async (req, res, next) => {
+  try {
+    const report = await getDuplicateContentReport(req.params.id);
+    if (!report) throw new ApiError(404, "CRAWL_NOT_FOUND", "That crawl could not be found.", "Start a new crawl.");
+    res.json({ crawlId: req.params.id, ...report });
+  } catch (error) {
+    next(error);
+  }
+});
+
+app.get("/api/crawls/:id/tree", async (req, res, next) => {
+  try {
+    const tree = await getCrawlTree(req.params.id);
+    if (!tree) throw new ApiError(404, "CRAWL_NOT_FOUND", "That crawl could not be found.", "Start a new crawl.");
+    res.json({ crawlId: req.params.id, ...tree });
   } catch (error) {
     next(error);
   }
